@@ -3,6 +3,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./config/swaggerConfig');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -22,6 +25,12 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/participants', participantRoutes);
 app.use('/api/jury', juryRoutes);
 
+// --- AJOUTEZ CETTE LIGNE POUR SERVIR LA DOCUMENTATION SWAGGER UI ---
+// Il est préférable de la placer APRÈS vos routes API normales
+// mais AVANT toute route de test générique ou gestion d'erreur catch-all
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// ------------------------------------------------------------------
+
 // Route de test
 app.get('/', (req, res) => {
     res.send('HackaPlan API is running!');
@@ -36,4 +45,6 @@ app.use((err, req, res, next) => {
 // Start the server
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    // Ajoutons un message de confirmation pour Swagger dans la console du serveur
+    console.log(`Swagger UI disponible à http://localhost:${PORT}/api-docs`);
 });

@@ -1,125 +1,203 @@
-// backend/controllers/participantController.js
-const supabase = require('../utils/supabaseClient');
+const { v4: uuidv4 } = require('uuid');
 
-// Inscription d'un nouveau participant
-exports.createParticipant = async (req, res) => {
+// Simulation d'une base de données en mémoire
+let participants = [];
+
+const participantController = {
+  // Créer un nouveau participant
+  createParticipant: async (req, res) => {
     try {
-        const { name, email, skills } = req.body;
+      const { name, email, skills, bio, avatar, github, linkedin } = req.body;
 
-        // Vérifier si l'email existe déjà
-        const { data: existingParticipant, error: existingError } = await supabase
-            .from('participants')
-            .select('id')
-            .eq('email', email)
-            .single();
+      // Validation des champs requis
+      if (!name || !email) {
+        return res.status(400).json({
+          error: 'Le nom et l\'email sont requis'
+        });
+      }
 
+      // Validation de l'email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          error: 'L\'email doit être valide'
+        });
+      }
+
+      // Vérifier si l'email existe déjà
+      const existingParticipant = participants.find(p => p.email === email);
+      if (existingParticipant) {
+        return res.status(409).json({
+          error: 'Un participant avec cet email existe déjà'
+        });
+      }
+
+      // Créer le nouveau participant
+      const newParticipant = {
+        id: uuidv4(),
+        name,
+        email,
+        skills: skills || [],
+        bio: bio || '',
+        avatar: avatar || null,
+        github: github || null,
+        linkedin: linkedin || null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      participants.push(newParticipant);
+
+      res.status(201).json(newParticipant);
+    } catch (error) {
+      console.error('Erreur lors de la création du participant:', error);
+      res.status(500).json({ error: 'Erreur interne du serveur' });
+    }
+  },
+
+  // Récupérer tous les participants avec filtres
+  getAllParticipants: async (req, res) => {
+    try {
+      const { skills, search, limit = 20, offset = 0 } = req.query;
+      
+      let filteredParticipants = [...participants];
+
+      // Filtrer par compétences si fourni
+      if (skills) {
+        const skillsArray = skills.split(',').map(s => s.trim().toLowerCase());
+        filteredParticipants = filteredParticipants.filter(participant =>
+          skillsArray.some(skill =>
+            participant.skills.some(pSkill => 
+              pSkill.toLowerCase().includes(skill)
+            )
+          )
+        );
+      }
+
+      // Recherche textuelle si fournie
+      if (search) {
+        const searchTerm = search.toLowerCase();
+        filteredParticipants = filteredParticipants.filter(participant =>
+          participant.name.toLowerCase().includes(searchTerm) ||
+          participant.email.toLowerCase().includes(searchTerm)
+        );
+      }
+
+      // Pagination
+      const total = filteredParticipants.length;
+      const paginatedParticipants = filteredParticipants.slice(
+        parseInt(offset), 
+        parseInt(offset) + parseInt(limit)
+      );
+
+      res.json({
+        participants: paginatedParticipants,
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      });
+    } catch (error) {
+      console.error('Erreur lors de la récupération des participants:', error);
+      res.status(500).json({ error: 'Erreur lors de la récupération des participants' });
+    }
+  },
+
+  // Récupérer un participant spécifique
+  getParticipant: async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      const participant = participants.find(p => p.id === id);
+      
+      if (!participant) {
+        return res.status(404).json({ error: 'Participant non trouvé' });
+      }
+
+      res.json(participant);
+    } catch (error) {
+      console.error('Erreur lors de la récupération du participant:', error);
+      res.status(500).json({ error: 'Erreur interne du serveur' });
+    }
+  },
+
+  // Mettre à jour un participant
+  updateParticipant: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+
+      const participantIndex = participants.findIndex(p => p.id === id);
+      
+      if (participantIndex === -1) {
+        return res.status(404).json({ error: 'Participant non trouvé' });
+      }
+
+      // Vérifier si l'email est modifié et s'il existe déjà
+      if (updates.email && updates.email !== participants[participantIndex].email) {
+        const existingParticipant = participants.find(p => p.email === updates.email);
         if (existingParticipant) {
-            return res.status(409).json({ message: 'Participant with this email already exists.' });
+          return res.status(409).json({
+            error: 'Un participant avec cet email existe déjà'
+          });
         }
-        if (existingError && existingError.code !== 'PGRST116') { // PGRST116: No rows found
-            throw existingError;
-        }
+      }
 
-        const { data, error } = await supabase
-            .from('participants')
-            .insert([{ name, email, skills }])
-            .select();
+      // Mettre à jour le participant
+      participants[participantIndex] = {
+        ...participants[participantIndex],
+        ...updates,
+        updatedAt: new Date().toISOString()
+      };
 
-        if (error) throw error;
-        res.status(201).json(data[0]);
+      res.json(participants[participantIndex]);
     } catch (error) {
-        console.error('Error creating participant:', error);
-        res.status(400).json({ message: error.message });
+      console.error('Erreur lors de la mise à jour du participant:', error);
+      res.status(500).json({ error: 'Erreur interne du serveur' });
     }
-};
+  },
 
-// Permet à un participant de s'inscrire à un projet
-exports.registerForProject = async (req, res) => {
+  // Supprimer un participant
+  deleteParticipant: async (req, res) => {
     try {
-        const { participantId, projectId } = req.body;
+      const { id } = req.params;
+      
+      const participantIndex = participants.findIndex(p => p.id === id);
+      
+      if (participantIndex === -1) {
+        return res.status(404).json({ error: 'Participant non trouvé' });
+      }
 
-        // Vérifier si le participant existe
-        const { data: participant, error: participantError } = await supabase
-            .from('participants')
-            .select('id')
-            .eq('id', participantId)
-            .single();
-        if (participantError || !participant) {
-            return res.status(404).json({ message: 'Participant not found.' });
-        }
-
-        // Vérifier si le projet existe
-        const { data: project, error: projectError } = await supabase
-            .from('projects')
-            .select('id')
-            .eq('id', projectId)
-            .single();
-        if (projectError || !project) {
-            return res.status(404).json({ message: 'Project not found.' });
-        }
-
-        // Vérifier si le participant est déjà dans l'équipe du projet
-        const { data: existingTeamMember, error: teamError } = await supabase
-            .from('project_teams')
-            .select('id')
-            .eq('project_id', projectId)
-            .eq('participant_id', participantId)
-            .single();
-
-        if (existingTeamMember) {
-            return res.status(409).json({ message: 'Participant is already registered for this project.' });
-        }
-        if (teamError && teamError.code !== 'PGRST116') { // PGRST116: No rows found
-            throw teamError;
-        }
-
-        // Ajouter le participant à l'équipe du projet
-        const { data: teamData, error: insertTeamError } = await supabase
-            .from('project_teams')
-            .insert([{ project_id: projectId, participant_id: participantId, role: 'Member' }])
-            .select();
-
-        if (insertTeamError) throw insertTeamError;
-
-        res.status(200).json({ message: 'Successfully registered for project and joined team!', teamMember: teamData[0] });
+      participants.splice(participantIndex, 1);
+      
+      res.status(204).send();
     } catch (error) {
-        console.error('Error registering participant for project:', error);
-        res.status(500).json({ message: error.message });
+      console.error('Erreur lors de la suppression du participant:', error);
+      res.status(500).json({ error: 'Erreur interne du serveur' });
     }
-};
+  },
 
-// Obtenir tous les participants
-exports.getAllParticipants = async (req, res) => {
+  // Récupérer les projets d'un participant
+  getParticipantProjects: async (req, res) => {
     try {
-        const { data, error } = await supabase
-            .from('participants')
-            .select('*')
-            .order('name', { ascending: true });
+      const { id } = req.params;
+      
+      const participant = participants.find(p => p.id === id);
+      
+      if (!participant) {
+        return res.status(404).json({ error: 'Participant non trouvé' });
+      }
 
-        if (error) throw error;
-        res.status(200).json(data);
+      // Cette fonction nécessiterait l'accès aux projets
+      // Pour l'instant, on retourne un tableau vide
+      // Dans une vraie application, on ferait une requête à la base de données
+      const participantProjects = [];
+
+      res.json(participantProjects);
     } catch (error) {
-        console.error('Error fetching all participants:', error);
-        res.status(500).json({ message: error.message });
+      console.error('Erreur lors de la récupération des projets du participant:', error);
+      res.status(500).json({ error: 'Erreur interne du serveur' });
     }
+  }
 };
 
-// Obtenir un participant par ID
-exports.getParticipantById = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { data, error } = await supabase
-            .from('participants')
-            .select('*')
-            .eq('id', id)
-            .single();
-
-        if (error) throw error;
-        if (!data) return res.status(404).json({ message: 'Participant not found.' });
-
-        res.status(200).json(data);
-    } catch (error) {
-        console.error('Error fetching participant by ID:', error);
-        res.status(500).json({ message: error.message });
-    }
-};
+module.exports = participantController;
